@@ -13,6 +13,7 @@ and fades away while you're interacting with the player, so the two never overla
 - Translucent **buffered‑ahead** segment, updated live (even while paused)
 - Round **scrubber dot** at the playhead
 - Rounded (pill) ends, matching YouTube
+- **Chapter gaps**, yellow **ad break markers**, and white **timed‑marker dots**, copied from YouTube's own bar
 - Shows/hides in sync with YouTube's own controls via the player's `ytp-autohide` state
 - Works across SPA navigations and in fullscreen
 
@@ -35,14 +36,21 @@ Tweak the constants at the top of the script:
 | ----------------- | -------------------------- | --------------------------------------------------- |
 | `alsoInFullscreen`| `true`                     | Keep the bar visible in fullscreen                  |
 | `barColor`        | `#f03`                     | Played‑fill / scrubber color (YouTube brand red)    |
-| `barLeadColor`    | `#ed4686`                  | Pink the fill fades into at the leading edge        |
-| `leadWidth`       | `100px`                    | Width of the leading‑edge fade                      |
-| `trackColor`      | `rgba(255,255,255,0.2)`    | Faint unplayed track                                |
+| `barLeadColor`    | `#ff2791`                  | Pink the fill fades into at the leading edge        |
+| `leadWidth`       | `20%`                      | Share of the fill that fades to pink (or a px width)|
+| `trackColor`      | `rgba(40,40,40,0.6)`       | Dark translucent unplayed track                     |
 | `loadedColor`     | `rgba(255,255,255,0.4)`    | Buffered‑ahead segment                              |
 | `barHeight`       | `4px`                      | Bar thickness                                       |
 | `dotSize`         | `12px`                     | Scrubber dot diameter                               |
 | `sideInset`       | `12px`                     | Horizontal inset each side (matches YouTube's width)|
 | `bottomOffset`    | `12px`                     | How far the bar floats up from the bottom           |
+| `showChapters`    | `true`                     | Split the bar into chapter segments                 |
+| `chapterGap`      | `4`                        | Gap (px) at each chapter boundary                   |
+| `showAdMarkers`   | `true`                     | Show YouTube's mid‑roll ad break markers            |
+| `adMarkerColor`   | `#fc0`                     | Ad marker color (YouTube's yellow)                  |
+| `showTimedMarkers`| `true`                     | Show YouTube's timed‑marker dots                    |
+| `timedMarkerColor`| `#fff`                     | Timed‑marker dot color                              |
+| `timedMarkerSize` | `4px`                      | Timed‑marker dot diameter                           |
 
 ## License
 

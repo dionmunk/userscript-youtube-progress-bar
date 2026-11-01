@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         YouTube Progress Bar
 // @namespace    https://github.com/dionmunk
-// @version      1.9
-// @description  A copy of YouTube's progress bar (buffered + scrubber dot + chapter segments), floated up from the bottom, that fades in whenever YouTube's own controls fade out.
+// @version      1.10
+// @description  A copy of YouTube's progress bar (buffered + scrubber dot + chapter segments + ad/timed markers), floated up from the bottom, that fades in whenever YouTube's own controls fade out.
 // @author       Dion Munk
 // @match        https://www.youtube.com/*
 // @grant        none
@@ -15,9 +15,9 @@
 
 const alsoInFullscreen = true;
 const barColor = '#f03'; // YouTube's brand red (--yt-sys-color-baseline--static-brand-red)
-const barLeadColor = '#ed4686'; // pink the fill fades into at the leading edge, like YouTube
-const leadWidth = '100px'; // width of the leading-edge fade, nearest the playhead
-const trackColor = 'rgba(255, 255, 255, 0.2)'; // faint unplayed track, matching YouTube
+const barLeadColor = '#ff2791'; // pink the fill fades into at the leading edge, like YouTube
+const leadWidth = '20%'; // share of the played fill (nearest the playhead) that fades to pink, like YouTube
+const trackColor = 'rgba(40, 40, 40, 0.6)'; // dark translucent unplayed track, matching YouTube
 const loadedColor = 'rgba(255, 255, 255, 0.4)'; // buffered-ahead portion, matching YouTube
 const barHeight = '4px';
 const dotSize = '12px'; // scrubber "dot" diameter, matching YouTube's
@@ -25,6 +25,11 @@ const sideInset = '12px'; // horizontal inset on each side, matching YouTube's b
 const bottomOffset = '12px'; // float the bar up from the bottom of the video
 const showChapters = true; // split the bar into chapter segments (when the video has chapters)
 const chapterGap = 4; // px gap punched into the bar at each chapter boundary, like YouTube
+const showAdMarkers = true; // mirror YouTube's yellow mid-roll ad break markers
+const adMarkerColor = '#fc0'; // YouTube's ad marker yellow
+const showTimedMarkers = true; // mirror YouTube's white timed-marker dots (when it draws any)
+const timedMarkerColor = '#fff';
+const timedMarkerSize = '4px'; // timed-marker dot diameter
 
 (function () {
     'use strict';
@@ -66,7 +71,7 @@ const chapterGap = 4; // px gap punched into the bar at each chapter boundary, l
     track.appendChild(loaded);
 
     const play = document.createElement('div'); // played portion (red fill)
-    play.style.backgroundColor = barColor; // fallback while the fill is narrower than leadWidth
+    play.style.backgroundColor = barColor; // fallback if leadWidth is set wider than the fill
     // Fade the last leadWidth of the fill (nearest the playhead) to a pink, like YouTube.
     play.style.backgroundImage =
         `linear-gradient(90deg, ${barColor} 0, ${barColor} calc(100% - ${leadWidth}), ${barLeadColor} 100%)`;
@@ -76,6 +81,18 @@ const chapterGap = 4; // px gap punched into the bar at each chapter boundary, l
     play.style.left = '0';
     play.style.top = '0';
     track.appendChild(play);
+
+    // Ad markers sit above the fill inside the (masked, clipped) track, like YouTube's.
+    const adLayer = document.createElement('div');
+    adLayer.style.position = 'absolute';
+    adLayer.style.inset = '0';
+    track.appendChild(adLayer);
+
+    // Timed-marker dots sit outside the track so chapter gaps don't slice them.
+    const timedLayer = document.createElement('div');
+    timedLayer.style.position = 'absolute';
+    timedLayer.style.inset = '0';
+    bar.appendChild(timedLayer);
 
     const dot = document.createElement('div'); // scrubber "dot" at the playhead
     dot.style.backgroundColor = barColor;
@@ -101,6 +118,7 @@ const chapterGap = 4; // px gap punched into the bar at each chapter boundary, l
                           visPlayer.classList.contains('ad-interrupting');
         const controlsHidden = visPlayer.classList.contains('ytp-autohide');
         bar.style.opacity = (controlsHidden && !adShowing) ? '1' : '0';
+        syncTimeline(); // e.g. chapters/markers appear once a pre-roll ad ends
     };
     const controlsObserver = new MutationObserver(syncVisibility);
 
@@ -111,19 +129,14 @@ const chapterGap = 4; // px gap punched into the bar at each chapter boundary, l
     // slices the track, buffered, and fill together, so the video shows through the
     // gaps exactly like YouTube. The scrubber dot sits above the mask, so it glides
     // across the gaps uninterrupted.
-    const clearChapters = () => {
-        track.style.webkitMaskImage = '';
-        track.style.maskImage = '';
-    };
-    const applyChapters = () => {
-        if (!showChapters || !visPlayer) return false;
-        const container = visPlayer.querySelector('.ytp-chapters-container');
+    const chapterMask = (player) => {
+        const container = player.querySelector('.ytp-chapters-container');
         const segs = container ? [...container.querySelectorAll('.ytp-chapter-hover-container')] : [];
-        if (segs.length < 2) return false; // no chapters (single-segment or none)
+        if (segs.length < 2) return ''; // no chapters (single-segment or none)
 
         const widths = segs.map((s) => parseFloat(s.style.width) || s.offsetWidth || 0);
         const total = widths.reduce((a, b) => a + b, 0);
-        if (!total) return false; // not laid out yet; caller will retry
+        if (!total) return ''; // not laid out yet; a later sync will pick it up
 
         // Cumulative interior boundaries as a fraction of the timeline.
         const g = chapterGap / 2 + 'px'; // half-gap on each side of the boundary
@@ -138,26 +151,73 @@ const chapterGap = 4; // px gap punched into the bar at each chapter boundary, l
             stops.push(`#000 calc(${pos} + ${g})`);
         }
         stops.push('#000 100%');
-        const grad = `linear-gradient(90deg, ${stops.join(', ')})`;
-        track.style.webkitMaskImage = grad;
-        track.style.maskImage = grad;
-        return true;
+        return `linear-gradient(90deg, ${stops.join(', ')})`;
     };
-    // The chapters container populates slightly after the player is ready, so retry
-    // briefly on each new video until we find segments (or give up on plain videos).
-    let chapterTimer = null;
-    const refreshChapters = () => {
-        clearChapters();
-        if (chapterTimer) clearInterval(chapterTimer);
-        if (!showChapters) return;
-        let tries = 0;
-        chapterTimer = setInterval(() => {
-            if (applyChapters() || ++tries > 20) clearInterval(chapterTimer); // ~6s max
-        }, 300);
-        applyChapters();
+
+    // Markers: YouTube draws ad breaks (`.ytp-ad-progress`, yellow) and timed
+    // markers (`.ytp-timed-marker`, white dots) on its own bar. We measure each one
+    // against YouTube's bar as [left%, width%] and redraw it on ours. Their boxes
+    // stay laid out while YouTube's controls are faded out, so this works whenever
+    // our bar is showing.
+    const markerSpans = (player, selector) => {
+        const els = [...player.querySelectorAll(selector)].filter((el) => el.getClientRects().length);
+        if (!els.length) return [];
+        const ref = player.querySelector('.ytp-progress-bar');
+        const r = ref && ref.getBoundingClientRect();
+        if (!r || !r.width) return [];
+        return els.map((el) => {
+            const m = el.getBoundingClientRect();
+            return [+((m.left - r.left) / r.width * 100).toFixed(3), +(m.width / r.width * 100).toFixed(3)];
+        });
+    };
+    const drawAdMarkers = (spans) => {
+        adLayer.replaceChildren(...spans.map(([left, width]) => {
+            const m = document.createElement('div');
+            m.style.position = 'absolute';
+            m.style.top = '0';
+            m.style.height = '100%';
+            m.style.left = left + '%';
+            m.style.width = width + '%';
+            m.style.backgroundColor = adMarkerColor;
+            return m;
+        }));
+    };
+    const drawTimedMarkers = (spans) => {
+        timedLayer.replaceChildren(...spans.map(([left, width]) => {
+            const m = document.createElement('div');
+            m.style.position = 'absolute';
+            m.style.left = (left + width / 2) + '%'; // center on YouTube's dot
+            m.style.top = '50%';
+            m.style.width = timedMarkerSize;
+            m.style.height = timedMarkerSize;
+            m.style.borderRadius = '50%';
+            m.style.transform = 'translate(-50%, -50%)';
+            m.style.backgroundColor = timedMarkerColor;
+            return m;
+        }));
+    };
+
+    // YouTube (re)builds chapters and markers some time after each navigation (often
+    // only once a pre-roll ad ends) and reuses the same <video> element across SPA
+    // navigations, so rather than waiting for a one-off event we re-read them on
+    // every timeupdate/class change and only touch our DOM when something changed.
+    let timelineKey = null;
+    const syncTimeline = () => {
+        if (!visPlayer) return;
+        const mask = showChapters ? chapterMask(visPlayer) : '';
+        const ads = showAdMarkers ? markerSpans(visPlayer, '.ytp-ad-progress') : [];
+        const timed = showTimedMarkers ? markerSpans(visPlayer, '.ytp-timed-marker') : [];
+        const key = JSON.stringify([mask, ads, timed]);
+        if (key === timelineKey) return;
+        timelineKey = key;
+        track.style.webkitMaskImage = mask;
+        track.style.maskImage = mask;
+        drawAdMarkers(ads);
+        drawTimedMarkers(timed);
     };
 
     const onProgress = (e) => {
+        syncTimeline();
         const v = e.target;
         if (!v.duration || isNaN(v.duration)) return; // guard against NaN early in load
         const pct = (v.currentTime / v.duration) * 100;
@@ -206,10 +266,10 @@ const chapterGap = 4; // px gap punched into the bar at each chapter boundary, l
             play.style.width = '0%';
             dot.style.left = '0%';
             loaded.style.width = '0%';
-            refreshChapters();
             v.addEventListener('timeupdate', onProgress, { passive: true });
             v.addEventListener('progress', onProgress, { passive: true });
         }
+        syncTimeline();
         return true;
     }
 
